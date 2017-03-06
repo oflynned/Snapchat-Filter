@@ -1,8 +1,8 @@
+import math
+
 import cv2
 import dlib
 import numpy as np
-import math
-import os
 
 from video import create_capture
 
@@ -51,81 +51,30 @@ def get_landmarks(img):
     return np.matrix([[p.x, p.y] for p in predictor(img, rects[0]).parts()])
 
 
-def annotate_landmarks(img, landmarks):
-    for index, point in enumerate(landmarks):
+def annotate_landmarks(im, landmarks):
+    im = im.copy()
+    for idx, point in enumerate(landmarks):
         pos = (point[0, 0], point[0, 1])
-        cv2.putText(img, str(index), pos, fontFace=cv2.FONT_HERSHEY_SCRIPT_SIMPLEX, fontScale=0.4, color=(255, 0, 0))
-        cv2.circle(img, pos, 3, color=(255, 255, 255))
-
-
-def get_moustache_bounds(img, landmarks):
-    # centre point location
-    lower_nose_point = landmarks[33]
-    upper_lip_point = landmarks[51]
-
-    philtrum_pos_x = (lower_nose_point[0, 0] + upper_lip_point[0, 0]) / 2
-    philtrum_pos_y = (lower_nose_point[0, 1] + upper_lip_point[0, 1]) / 2
-    anchor_pos = (int(philtrum_pos_x), int(philtrum_pos_y))
-
-    cv2.putText(img, "MOUSTACHE", anchor_pos, fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.4, color=(255, 0, 0))
-    cv2.circle(img, anchor_pos, 3, color=(255, 255, 255))
-
-    # left bound
-    bounds_left_lip = landmarks[48]
-    bounds_left_jaw = landmarks[3]
-
-    bounds_left_x = (bounds_left_jaw[0, 0] + bounds_left_lip[0, 0]) / 2
-    bounds_left_y = (bounds_left_jaw[0, 1] + bounds_left_lip[0, 1]) / 2
-    bounds_left_pos = (int(bounds_left_x), int(bounds_left_y))
-
-    cv2.putText(img, "LEFT BOUND", bounds_left_pos, fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.4, color=(255, 0, 0))
-    cv2.circle(img, bounds_left_pos, 3, color=(255, 255, 255))
-
-    # right bound
-    bounds_right_lip = landmarks[54]
-    bounds_right_jaw = landmarks[13]
-
-    bounds_right_x = (bounds_right_jaw[0, 0] + bounds_right_lip[0, 0]) / 2
-    bounds_right_y = (bounds_right_jaw[0, 1] + bounds_right_lip[0, 1]) / 2
-    bounds_right_pos = (int(bounds_right_x), int(bounds_right_y))
-
-    cv2.putText(img, "RIGHT BOUND", bounds_right_pos, fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.4,
-                color=(255, 0, 0))
-    cv2.circle(img, bounds_right_pos, 3, color=(255, 255, 255))
-
-    # draw_moustache(anchor_pos, bounds_left_pos, bounds_right_pos, img)
-
-
-def blend_transparent(face_img, overlay_t_img):
-    # Split out the transparency mask from the colour info
-    overlay_img = overlay_t_img[:, :, :3]  # Grab the BRG planes
-    overlay_mask = overlay_t_img[:, :, 3:]  # And the alpha plane
-
-    # Again calculate the inverse mask
-    background_mask = 255 - overlay_mask
-
-    # Turn the masks into three channel, so we can use them as weights
-    overlay_mask = cv2.cvtColor(overlay_mask, cv2.COLOR_GRAY2BGR)
-    background_mask = cv2.cvtColor(background_mask, cv2.COLOR_GRAY2BGR)
-
-    # Create a masked out face image, and masked out overlay
-    # We convert the images to floating point in range 0.0 - 1.0
-    face_part = (face_img * (1 / 255.0)) * (background_mask * (1 / 255.0))
-    overlay_part = (overlay_img * (1 / 255.0)) * (overlay_mask * (1 / 255.0))
-
-    # And finally just add them together, and rescale it back to an 8bit integer image
-    return np.uint8(cv2.addWeighted(face_part, 255.0, overlay_part, 255.0, 0.0))
+        cv2.putText(im, str(idx), pos,
+                    fontFace=cv2.FONT_HERSHEY_SCRIPT_SIMPLEX,
+                    fontScale=0.4,
+                    color=(0, 0, 255))
+        cv2.circle(im, pos, 3, color=(0, 255, 255))
+    return im
 
 
 def draw_convex_hull(im, points, color):
-    cv2.fillConvexPoly(im, cv2.convexHull(points), color=color)
+    points = cv2.convexHull(points)
+    cv2.fillConvexPoly(im, points, color=color)
 
 
 def get_face_mask(im, landmarks):
     im = np.zeros(im.shape[:2], dtype=np.float64)
 
     for group in OVERLAY_POINTS:
-        draw_convex_hull(im, landmarks[group], color=1)
+        draw_convex_hull(im,
+                         landmarks[group],
+                         color=1)
 
     im = np.array([im, im, im]).transpose((1, 2, 0))
 
@@ -136,34 +85,59 @@ def get_face_mask(im, landmarks):
 
 
 def transformation_from_points(points1, points2):
-    points1 = points1.astype(np.float64)
-    c1 = np.mean(points1, axis=0)
-    points1 -= c1
-    s1 = np.std(points1)
-    points1 /= s1
+    """
+    Return an affine transformation [s * R | T] such that:
+        sum ||s*R*p1,i + T - p2,i||^2
+    is minimized.
+    """
+    # Solve the procrustes problem by subtracting centroids, scaling by the
+    # standard deviation, and then using the SVD to calculate the rotation. See
+    # the following for more details:
+    #   https://en.wikipedia.org/wiki/Orthogonal_Procrustes_problem
 
+    points1 = points1.astype(np.float64)
     points2 = points2.astype(np.float64)
+
+    c1 = np.mean(points1, axis=0)
     c2 = np.mean(points2, axis=0)
+    points1 -= c1
     points2 -= c2
+
+    s1 = np.std(points1)
     s2 = np.std(points2)
+    points1 /= s1
     points2 /= s2
 
-    u, s, vt = np.linalg.svd(points1.T * points2)
-    r = (u * vt).T
+    U, S, Vt = np.linalg.svd(points1.T * points2)
 
-    return np.vstack([np.hstack(((s2 / s1) * r, c2.T - (s2 / s1) * r * c1.T)), np.matrix([0., 0., 1.])])
+    # The R we seek is in fact the transpose of the one given by U * Vt. This
+    # is because the above formulation assumes the matrix goes on the right
+    # (with row vectors) where as our solution requires the matrix to be on the
+    # left (with column vectors).
+    R = (U * Vt).T
+
+    return np.vstack([np.hstack(((s2 / s1) * R,
+                                       c2.T - (s2 / s1) * R * c1.T)),
+                         np.matrix([0., 0., 1.])])
 
 
 def read_im_and_landmarks(fname):
-    im = cv2.imread(fname, 1)
-    im = cv2.resize(im, (im.shape[1] * SCALE_FACTOR, im.shape[0] * SCALE_FACTOR))
-    return im, get_landmarks(im)
+    im = cv2.imread(fname, cv2.IMREAD_COLOR)
+    im = cv2.resize(im, (im.shape[1] * SCALE_FACTOR,
+                         im.shape[0] * SCALE_FACTOR))
+    s = get_landmarks(im)
+
+    return im, s
 
 
 def warp_im(im, M, dshape):
     output_im = np.zeros(dshape, dtype=im.dtype)
-    cv2.warpAffine(im, M[:2], (dshape[1], dshape[0]), dst=output_im,
-                   borderMode=cv2.BORDER_TRANSPARENT, flags=cv2.WARP_INVERSE_MAP)
+    cv2.warpAffine(im,
+                   M[:2],
+                   (dshape[1], dshape[0]),
+                   dst=output_im,
+                   borderMode=cv2.BORDER_TRANSPARENT,
+                   flags=cv2.WARP_INVERSE_MAP)
     return output_im
 
 
@@ -180,8 +154,8 @@ def correct_colours(im1, im2, landmarks1):
     # Avoid divide-by-zero errors.
     im2_blur += (128 * (im2_blur <= 1.0)).astype(im2_blur.dtype)
 
-    return (im2.astype(np.uint8) * im1_blur.astype(np.uint8) /
-            im2_blur.astype(np.uint8))
+    return (im2.astype(np.float64) * im1_blur.astype(np.float64) /
+            im2_blur.astype(np.float64))
 
 
 def face_swap(img1, landmarks1, img2, landmarks2):
@@ -205,6 +179,27 @@ def get_rotated_points(point, anchor, deg_angle):
     qx = ox + math.cos(angle) * (px - ox) - math.sin(angle) * (py - oy)
     qy = oy + math.sin(angle) * (px - ox) + math.cos(angle) * (py - oy)
     return [int(qx), int(qy)]
+
+
+def blend_transparent(face_img, overlay_t_img):
+    # Split out the transparency mask from the colour info
+    overlay_img = overlay_t_img[:, :, :3]  # Grab the BRG planes
+    overlay_mask = overlay_t_img[:, :, 3:]  # And the alpha plane
+
+    # Again calculate the inverse mask
+    background_mask = 255 - overlay_mask
+
+    # Turn the masks into three channel, so we can use them as weights
+    overlay_mask = cv2.cvtColor(overlay_mask, cv2.COLOR_GRAY2BGR)
+    background_mask = cv2.cvtColor(background_mask, cv2.COLOR_GRAY2BGR)
+
+    # Create a masked out face image, and masked out overlay
+    # We convert the images to floating point in range 0.0 - 1.0
+    face_part = (face_img * (1 / 255.0)) * (background_mask * (1 / 255.0))
+    overlay_part = (overlay_img * (1 / 255.0)) * (overlay_mask * (1 / 255.0))
+
+    # And finally just add them together, and rescale it back to an 8bit integer image
+    return np.uint8(cv2.addWeighted(face_part, 255.0, overlay_part, 255.0, 0.0))
 
 
 def glasses_filter(cam, glasses):
@@ -352,27 +347,27 @@ def moustache_filter(cam, moustache):
         cv2.imshow("Moustache Filter", result_2)
 
 
-def face_swap_filter(cam):
-    # im1 = get_cam_frame(cam)
-    # im1 = cv2.resize(im1, (im1.shape[1] * SCALE_FACTOR, im1.shape[0] * SCALE_FACTOR))
-    # landmarks1 = get_landmarks(im1)
+def face_swap_filter(cam, swap_img, swap_img_landmarks):
+    me_img = get_cam_frame(cam)
+    me_img = cv2.resize(me_img, (me_img.shape[1] * SCALE_FACTOR, me_img.shape[0] * SCALE_FACTOR))
+    me_landmarks = get_landmarks(me_img)
 
-    im1, landmarks1 = read_im_and_landmarks("resources/img1.png")
-    im2, landmarks2 = read_im_and_landmarks("resources/img2.png")
+    # me_img, me_landmarks = read_im_and_landmarks("resources/bryan_cranston.png")
 
-    if type(landmarks1) is not int:
-        M = transformation_from_points(landmarks1[ALIGN_POINTS],
-                                       landmarks2[ALIGN_POINTS])
+    if type(me_landmarks) is not int:
+        m = transformation_from_points(me_landmarks[ALIGN_POINTS], swap_img_landmarks[ALIGN_POINTS])
 
-        mask = get_face_mask(im2, landmarks2)
-        warped_mask = warp_im(mask, M, im1.shape)
-        combined_mask = np.max([get_face_mask(im1, landmarks1), warped_mask], axis=0)
+        mask = get_face_mask(swap_img, swap_img_landmarks)
+        warped_mask = warp_im(mask, m, me_img.shape)
+        combined_mask = np.max([get_face_mask(me_img, me_landmarks), warped_mask], axis=0)
 
-        warped_im2 = warp_im(im2, M, im1.shape)
-        warped_corrected_im2 = correct_colours(im1, warped_im2, landmarks1)
+        warped_swap = warp_im(swap_img, m, me_img.shape)
+        warped_corrected_swap = correct_colours(me_img, warped_swap, me_landmarks)
 
-        output_im = im1 * (1.0 - combined_mask) + warped_corrected_im2 * combined_mask
-        cv2.imshow("output", output_im)
+        output_im = me_img * (1.0 - combined_mask) + warped_corrected_swap * combined_mask
+        cv2.imwrite("swap_output.png", output_im)
+        out = cv2.imread("swap_output.png", 1)
+        cv2.imshow("Swap Output", out)
 
 
 def main():
@@ -381,10 +376,14 @@ def main():
     glasses = cv2.imread('resources/glasses.png', -1)
     moustache = cv2.imread('resources/moustache.png', -1)
 
+    swap_img = cv2.imread('resources/bryan_cranston.png', -1)
+    swap_img_landmarks = get_landmarks(swap_img)
+
     while True:
         # glasses_filter(cam, glasses)
         # moustache_filter(cam, moustache)
-        face_swap_filter(cam)
+        face_swap_filter(cam, swap_img, swap_img_landmarks)
+
         if 0xFF & cv2.waitKey(30) == 27:
             break
 
