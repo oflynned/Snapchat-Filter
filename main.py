@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import math
 
 import cv2
@@ -5,6 +7,7 @@ import dlib
 import numpy as np
 
 from video import create_capture
+import sys
 
 predictor_path = "resources/landmark_predictor.dat"
 detector = dlib.get_frontal_face_detector()
@@ -12,29 +15,18 @@ predictor = dlib.shape_predictor(predictor_path)
 
 SCALE_FACTOR = 1
 FEATHER_AMOUNT = 11
+COLOUR_CORRECT_BLUR = 0.5
 
-FACE_POINTS = list(range(17, 68))
 MOUTH_POINTS = list(range(48, 61))
 RIGHT_BROW_POINTS = list(range(17, 22))
 LEFT_BROW_POINTS = list(range(22, 27))
 RIGHT_EYE_POINTS = list(range(36, 42))
 LEFT_EYE_POINTS = list(range(42, 48))
 NOSE_POINTS = list(range(27, 35))
-JAW_POINTS = list(range(0, 17))
-LOWER_NOSE = list(range(31, 36))
 
-# Points used to line up the images.
-ALIGN_POINTS = (LEFT_BROW_POINTS + RIGHT_EYE_POINTS + LEFT_EYE_POINTS + RIGHT_BROW_POINTS + NOSE_POINTS + MOUTH_POINTS)
-
-# Points from the second image to overlay on the first. The convex hull of each
-# element will be overlaid.
-OVERLAY_POINTS = [
-    LEFT_EYE_POINTS + RIGHT_EYE_POINTS + LEFT_BROW_POINTS + RIGHT_BROW_POINTS, NOSE_POINTS + MOUTH_POINTS,
-]
-
-# Amount of blur to use during colour correction, as a fraction of the
-# pupillary distance.
-COLOUR_CORRECT_BLUR_FRAC = 0.6
+POINTS = LEFT_BROW_POINTS + RIGHT_EYE_POINTS + LEFT_EYE_POINTS + RIGHT_BROW_POINTS + NOSE_POINTS + MOUTH_POINTS
+ALIGN_POINTS = POINTS
+OVERLAY_POINTS = [POINTS]
 
 
 def get_cam_frame(cam):
@@ -72,56 +64,40 @@ def get_face_mask(im, landmarks):
     im = np.zeros(im.shape[:2], dtype=np.float64)
 
     for group in OVERLAY_POINTS:
-        draw_convex_hull(im,
-                         landmarks[group],
-                         color=1)
+        draw_convex_hull(im, landmarks[group], color=1)
 
     im = np.array([im, im, im]).transpose((1, 2, 0))
-
-    im = (cv2.GaussianBlur(im, (FEATHER_AMOUNT, FEATHER_AMOUNT), 0) > 0) * 1.0
+    im = cv2.GaussianBlur(im, (FEATHER_AMOUNT, FEATHER_AMOUNT), 0) > 0
+    im = im * 1.0
     im = cv2.GaussianBlur(im, (FEATHER_AMOUNT, FEATHER_AMOUNT), 0)
 
     return im
 
 
-def transformation_from_points(points1, points2):
-    """
-    Return an affine transformation [s * R | T] such that:
-        sum ||s*R*p1,i + T - p2,i||^2
-    is minimized.
-    """
-    # Solve the procrustes problem by subtracting centroids, scaling by the
-    # standard deviation, and then using the SVD to calculate the rotation. See
-    # the following for more details:
-    #   https://en.wikipedia.org/wiki/Orthogonal_Procrustes_problem
-
+def transformation_f_points(points1, points2):
     points1 = points1.astype(np.float64)
     points2 = points2.astype(np.float64)
 
     c1 = np.mean(points1, axis=0)
     c2 = np.mean(points2, axis=0)
+
     points1 -= c1
     points2 -= c2
 
     s1 = np.std(points1)
     s2 = np.std(points2)
+
     points1 /= s1
     points2 /= s2
 
-    U, S, Vt = np.linalg.svd(points1.T * points2)
+    u, s, vt = np.linalg.svd(points1.T * points2)
+    r = (u * vt).T
 
-    # The R we seek is in fact the transpose of the one given by U * Vt. This
-    # is because the above formulation assumes the matrix goes on the right
-    # (with row vectors) where as our solution requires the matrix to be on the
-    # left (with column vectors).
-    R = (U * Vt).T
-
-    return np.vstack([np.hstack(((s2 / s1) * R,
-                                       c2.T - (s2 / s1) * R * c1.T)),
-                         np.matrix([0., 0., 1.])])
+    h_stack = np.hstack(((s2 / s1) * r, c2.T - (s2 / s1) * r * c1.T))
+    return np.vstack([h_stack, np.matrix([0., 0., 1.])])
 
 
-def read_im_and_landmarks(fname):
+def get_im_w_landmarks(fname):
     im = cv2.imread(fname, cv2.IMREAD_COLOR)
     im = cv2.resize(im, (im.shape[1] * SCALE_FACTOR,
                          im.shape[0] * SCALE_FACTOR))
@@ -130,28 +106,25 @@ def read_im_and_landmarks(fname):
     return im, s
 
 
-def warp_im(im, M, dshape):
+def warp_im(im, m, dshape):
     output_im = np.zeros(dshape, dtype=im.dtype)
-    cv2.warpAffine(im,
-                   M[:2],
-                   (dshape[1], dshape[0]),
-                   dst=output_im,
-                   borderMode=cv2.BORDER_TRANSPARENT,
-                   flags=cv2.WARP_INVERSE_MAP)
+    cv2.warpAffine(im, m[:2], (dshape[1], dshape[0]), dst=output_im,
+                   borderMode=cv2.BORDER_TRANSPARENT, flags=cv2.WARP_INVERSE_MAP)
     return output_im
 
 
 def correct_colours(im1, im2, landmarks1):
-    blur_amount = COLOUR_CORRECT_BLUR_FRAC * np.linalg.norm(
+    blur_amount = COLOUR_CORRECT_BLUR * np.linalg.norm(
         np.mean(landmarks1[LEFT_EYE_POINTS], axis=0) -
         np.mean(landmarks1[RIGHT_EYE_POINTS], axis=0))
     blur_amount = int(blur_amount)
+
     if blur_amount % 2 == 0:
         blur_amount += 1
     im1_blur = cv2.GaussianBlur(im1, (blur_amount, blur_amount), 0)
     im2_blur = cv2.GaussianBlur(im2, (blur_amount, blur_amount), 0)
 
-    # Avoid divide-by-zero errors.
+    # Avoid division errors.
     im2_blur += (128 * (im2_blur <= 1.0)).astype(im2_blur.dtype)
 
     return (im2.astype(np.float64) * im1_blur.astype(np.float64) /
@@ -159,7 +132,7 @@ def correct_colours(im1, im2, landmarks1):
 
 
 def face_swap(img1, landmarks1, img2, landmarks2):
-    m = transformation_from_points(landmarks1[ALIGN_POINTS], landmarks2[ALIGN_POINTS])
+    m = transformation_f_points(landmarks1[ALIGN_POINTS], landmarks2[ALIGN_POINTS])
 
     mask = get_face_mask(img2, landmarks2)
     warped_mask = warp_im(mask, m, img1.shape)
@@ -181,28 +154,24 @@ def get_rotated_points(point, anchor, deg_angle):
     return [int(qx), int(qy)]
 
 
-def blend_transparent(face_img, overlay_t_img):
-    # Split out the transparency mask from the colour info
-    overlay_img = overlay_t_img[:, :, :3]  # Grab the BRG planes
-    overlay_mask = overlay_t_img[:, :, 3:]  # And the alpha plane
+def blend_w_transparency(face_img, overlay_image):
+    # BGR
+    overlay_img = overlay_image[:, :, :3]
+    # A
+    overlay_mask = overlay_image[:, :, 3:]
 
-    # Again calculate the inverse mask
     background_mask = 255 - overlay_mask
-
-    # Turn the masks into three channel, so we can use them as weights
     overlay_mask = cv2.cvtColor(overlay_mask, cv2.COLOR_GRAY2BGR)
     background_mask = cv2.cvtColor(background_mask, cv2.COLOR_GRAY2BGR)
 
-    # Create a masked out face image, and masked out overlay
-    # We convert the images to floating point in range 0.0 - 1.0
     face_part = (face_img * (1 / 255.0)) * (background_mask * (1 / 255.0))
     overlay_part = (overlay_img * (1 / 255.0)) * (overlay_mask * (1 / 255.0))
 
-    # And finally just add them together, and rescale it back to an 8bit integer image
+    # cast to 8 bit matrix
     return np.uint8(cv2.addWeighted(face_part, 255.0, overlay_part, 255.0, 0.0))
 
 
-def glasses_filter(cam, glasses):
+def glasses_filter(cam, glasses, should_show_bounds = False):
     face = get_cam_frame(cam)
     landmarks = get_landmarks(face)
 
@@ -254,17 +223,18 @@ def glasses_filter(cam, glasses):
         m = cv2.getPerspectiveTransform(pts1, pts)
 
         rotated = cv2.warpPerspective(glasses, m, (face.shape[1], face.shape[0]))
-        result_2 = blend_transparent(face, rotated)
+        result_2 = blend_w_transparency(face, rotated)
 
-        for p in pts:
-            pos = (p[0], p[1])
-            cv2.circle(result_2, pos, 2, (0, 0, 255), 2)
-            cv2.putText(result_2, str(p), pos, fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.4, color=(255, 0, 0))
+        if should_show_bounds:
+            for p in pts:
+                pos = (p[0], p[1])
+                cv2.circle(result_2, pos, 2, (0, 0, 255), 2)
+                cv2.putText(result_2, str(p), pos, fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.4, color=(255, 0, 0))
 
         cv2.imshow("Glasses Filter", result_2)
 
 
-def moustache_filter(cam, moustache):
+def moustache_filter(cam, moustache, should_show_bounds = False):
     face = get_cam_frame(cam)
     landmarks = get_landmarks(face)
 
@@ -335,14 +305,15 @@ def moustache_filter(cam, moustache):
         m = cv2.getPerspectiveTransform(pts1, pts)
 
         rotated = cv2.warpPerspective(moustache, m, (face.shape[1], face.shape[0]))
-        result_2 = blend_transparent(face, rotated)
+        result_2 = blend_w_transparency(face, rotated)
 
         # annotate_landmarks(result_2, landmarks)
 
-        for p in pts:
-            pos = (p[0], p[1])
-            cv2.circle(result_2, pos, 2, (0, 0, 255), 2)
-            cv2.putText(result_2, str(p), pos, fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.4, color=(255, 0, 0))
+        if should_show_bounds:
+            for p in pts:
+                pos = (p[0], p[1])
+                cv2.circle(result_2, pos, 2, (0, 0, 255), 2)
+                cv2.putText(result_2, str(p), pos, fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=0.4, color=(255, 0, 0))
 
         cv2.imshow("Moustache Filter", result_2)
 
@@ -355,7 +326,7 @@ def face_swap_filter(cam, swap_img, swap_img_landmarks):
     # me_img, me_landmarks = read_im_and_landmarks("resources/bryan_cranston.png")
 
     if type(me_landmarks) is not int:
-        m = transformation_from_points(me_landmarks[ALIGN_POINTS], swap_img_landmarks[ALIGN_POINTS])
+        m = transformation_f_points(me_landmarks[ALIGN_POINTS], swap_img_landmarks[ALIGN_POINTS])
 
         mask = get_face_mask(swap_img, swap_img_landmarks)
         warped_mask = warp_im(mask, m, me_img.shape)
@@ -376,13 +347,28 @@ def main():
     glasses = cv2.imread('resources/glasses.png', -1)
     moustache = cv2.imread('resources/moustache.png', -1)
 
-    swap_img = cv2.imread('resources/bryan_cranston.png', -1)
+    swap_img = cv2.imread('resources/aaron_paul.png', -1)
     swap_img_landmarks = get_landmarks(swap_img)
 
+    args = sys.argv
+    should_show_bounds = False
+
     while True:
-        # glasses_filter(cam, glasses)
-        # moustache_filter(cam, moustache)
-        face_swap_filter(cam, swap_img, swap_img_landmarks)
+        if "--show-bounds" in args:
+            should_show_bounds = True
+
+        if "--glasses" in args:
+            glasses_filter(cam, glasses, should_show_bounds)
+        elif "--moustache" in args:
+            moustache_filter(cam, moustache, should_show_bounds)
+        elif "--face-swap" in args:
+            face_swap_filter(cam, swap_img, swap_img_landmarks)
+        else:
+            print("No arguments passed in, options are:")
+            print("--glasses for glasses filter")
+            print("--moustache for moustache filter")
+            print("--face-swap for face swapping with an image of Aaron Paul")
+            print("--show-bounds for an option debug parameter of seeing the bounds of the overlay")
 
         if 0xFF & cv2.waitKey(30) == 27:
             break
