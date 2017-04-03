@@ -171,7 +171,7 @@ def blend_w_transparency(face_img, overlay_image):
     return np.uint8(cv2.addWeighted(face_part, 255.0, overlay_part, 255.0, 0.0))
 
 
-def glasses_filter(cam, glasses, should_show_bounds = False):
+def glasses_filter(cam, glasses, should_show_bounds=False):
     face = get_cam_frame(cam)
     landmarks = get_landmarks(face)
 
@@ -234,7 +234,7 @@ def glasses_filter(cam, glasses, should_show_bounds = False):
         cv2.imshow("Glasses Filter", result_2)
 
 
-def moustache_filter(cam, moustache, should_show_bounds = False):
+def moustache_filter(cam, moustache, should_show_bounds=False):
     face = get_cam_frame(cam)
     landmarks = get_landmarks(face)
 
@@ -344,14 +344,21 @@ def face_swap_filter(cam, swap_img, swap_img_landmarks):
 def main():
     cam = create_capture(0)
 
+    args = sys.argv
+    should_show_bounds = False
+
     glasses = cv2.imread('resources/glasses.png', -1)
     moustache = cv2.imread('resources/moustache.png', -1)
 
-    swap_img = cv2.imread('resources/aaron_paul.png', -1)
-    swap_img_landmarks = get_landmarks(swap_img)
+    if "--face-swap" in args:
+        if "--bryan" in args:
+            swap_img = cv2.imread('resources/bryan_cranston.png', -1)
+        elif "--aaron" in args:
+            swap_img = cv2.imread('resources/aaron_paul.png', -1)
+        elif "--leo" in args:
+            swap_img = cv2.imread('resources/leonardo_dicaprio.png', -1)
 
-    args = sys.argv
-    should_show_bounds = False
+        swap_img_landmarks = get_landmarks(swap_img)
 
     while True:
         if "--show-bounds" in args:
@@ -369,6 +376,7 @@ def main():
             print("--moustache for moustache filter")
             print("--face-swap for face swapping with an image of Aaron Paul")
             print("--show-bounds for an option debug parameter of seeing the bounds of the overlay")
+            break
 
         if 0xFF & cv2.waitKey(30) == 27:
             break
