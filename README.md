@@ -11,3 +11,5 @@ In resources, place any images you want to use in it for filters (face swap imag
 Make sure you have Python 3 installed, see here for easy installation with Brew on OSX http://www.pyimagesearch.com/2016/12/19/install-opencv-3-on-macos-with-homebrew-the-easy-way/
 
 Also make sure you have pip installed with the libraries dlib and numpy. Install any others as required.
+
+If you want to create bug fixes or extend functionality, feel free to send pull requests.
