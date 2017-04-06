@@ -357,6 +357,19 @@ def main():
             swap_img = cv2.imread('resources/aaron_paul.png', -1)
         elif "--leo" in args:
             swap_img = cv2.imread('resources/leonardo_dicaprio.png', -1)
+        elif "--cage" in args:
+            swap_img = cv2.imread('resources/nicholas_cage.png', -1)
+        elif "--trump" in args:
+            swap_img = cv2.imread('resources/trump.jpg', -1)
+        else:
+            print("No face argument provided, options are:")
+            print("--aaron for Aaron Paul")
+            print("--bryan for Bryan Cranston")
+            print("--cage for Nicholas Cage")
+            print("--leo for Leonardo DiCaprio")
+            print("--trump for Donald Trump")
+            print("Defaulting to Trump due to a lack of arguments. Heh.")
+            swap_img = cv2.imread('resources/trump.jpg', -1)
 
         swap_img_landmarks = get_landmarks(swap_img)
 
