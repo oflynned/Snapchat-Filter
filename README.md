@@ -1,4 +1,6 @@
 # CS7434-Snapchat-Filter
+Paper written on this is available here: http://www.syzible.com/snapchat-filter
+
 3 filters for CS7434 augmented reality - face swap, glasses and moustache
 
 Clone the repo and create a directory in it called "resources". In this, you need the pre-trained face data available here:
