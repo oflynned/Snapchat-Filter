@@ -1,5 +1,5 @@
 # CS7434-Snapchat-Filter
-Paper written on this is available here: http://www.syzible.com/snapchat-filter
+Paper written on this is available here: https://www.syzible.com/snapchat-filters.pdf
 
 3 filters for CS7434 augmented reality - face swap, glasses and moustache
 
