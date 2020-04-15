@@ -18,7 +18,7 @@ source .env/bin/activate
 
 ```
 
-# Whitepaper
+# Research paper
 Paper written on this is available here: https://syzible.com/snapchat-filters.pdf
 
 3 filters for CS7434 augmented reality - face swap, glasses and moustache
