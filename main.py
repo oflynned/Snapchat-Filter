@@ -8,8 +8,10 @@ import numpy as np
 
 from video import create_capture
 import sys
+import argparse
+import time
 
-predictor_path = "resources/landmark_predictor.dat"
+predictor_path = "resources/shape_predictor_68_face_landmarks.dat"
 detector = dlib.get_frontal_face_detector()
 predictor = dlib.shape_predictor(predictor_path)
 
@@ -177,7 +179,9 @@ def glasses_filter(cam, glasses, should_show_bounds=False):
     face = get_cam_frame(cam)
     landmarks = get_landmarks(face)
 
-    pts1 = np.float32([[0, 0], [599, 0], [0, 208], [599, 208]])
+    # glasses.shape = (height, width, rgba channels)
+    pts1 = np.float32([[0, 0], [glasses.shape[1], 0], [0, glasses.shape[0]], [glasses.shape[1], glasses.shape[0]]])
+
 
     if type(landmarks) is not int:
         """
@@ -240,7 +244,8 @@ def moustache_filter(cam, moustache, should_show_bounds=False):
     face = get_cam_frame(cam)
     landmarks = get_landmarks(face)
 
-    pts1 = np.float32([[0, 0], [599, 0], [0, 208], [599, 208]])
+    # moustache.shape = (height, width, rgba channels)
+    pts1 = np.float32([[0, 0], [moustache.shape[1], 0], [0, moustache.shape[0]], [moustache.shape[1], moustache.shape[0]]])
 
     """
     MOUSTACHE ANCHOR POINTS
@@ -344,60 +349,43 @@ def face_swap_filter(cam, swap_img, swap_img_landmarks):
 
 
 def main():
-    cam = create_capture(0)
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("--filter", type=str, default="glasses")
+    argparser.add_argument("--footage", type=str, default=None)
+    argparser.add_argument("--show-bounds", action="store_true")
+    argparser.add_argument("--video-source", type=int, default=0, help="Video input device number")
 
-    args = sys.argv
+    args = argparser.parse_args()
+
+    cam = create_capture(args.video_source)
     should_show_bounds = False
 
-    glasses = cv2.imread('resources/glasses.png', -1)
-    moustache = cv2.imread('resources/moustache.png', -1)
+    footage = cv2.imread(args.footage, -1)
 
-    if "--face-swap" in args:
-        if "--bryan" in args:
-            swap_img = cv2.imread('resources/bryan_cranston.png', -1)
-        elif "--aaron" in args:
-            swap_img = cv2.imread('resources/aaron_paul.png', -1)
-        elif "--leo" in args:
-            swap_img = cv2.imread('resources/leonardo_dicaprio.png', -1)
-        elif "--cage" in args:
-            swap_img = cv2.imread('resources/nicholas_cage.png', -1)
-        elif "--trump" in args:
-            swap_img = cv2.imread('resources/trump.jpg', -1)
-        else:
-            print("No face argument provided, options are:")
-            print("--aaron for Aaron Paul")
-            print("--bryan for Bryan Cranston")
-            print("--cage for Nicholas Cage")
-            print("--leo for Leonardo DiCaprio")
-            print("--trump for Donald Trump")
-            print("Defaulting to Trump due to a lack of arguments. Heh.")
-            swap_img = cv2.imread('resources/trump.jpg', -1)
+    if args.filter == "face":
+        swap_img_landmarks = get_landmarks(footage)
 
-        swap_img_landmarks = get_landmarks(swap_img)
+    try:
+        while True:
+            start = time.time()
 
-    while True:
-        if "--show-bounds" in args:
-            should_show_bounds = True
+            if "glasses" == args.filter:
+                glasses_filter(cam, footage, args.show_bounds)
+            elif "moustache" == args.filter:
+                moustache_filter(cam, footage, args.show_bounds)
+            elif "face" in args:
+                face_swap_filter(cam, footage, swap_img_landmarks)
 
-        if "--glasses" in args:
-            glasses_filter(cam, glasses, should_show_bounds)
-        elif "--moustache" in args:
-            moustache_filter(cam, moustache, should_show_bounds)
-        elif "--face-swap" in args:
-            face_swap_filter(cam, swap_img, swap_img_landmarks)
-        else:
-            print("No arguments passed in, options are:")
-            print("--glasses for glasses filter")
-            print("--moustache for moustache filter")
-            print("--face-swap for face swapping with an image of Aaron Paul")
-            print("--show-bounds for an option debug parameter of seeing the bounds of the overlay")
-            break
+            delay = (int(time.time()*1000)-int(start*1000))
+            print(f"{delay} ms")
 
-        if 0xFF & cv2.waitKey(30) == 27:
-            break
+            if 0xFF & cv2.waitKey(30) == 27:
+                    break
+
+    except KeyboardInterrupt:
+        pass
 
     cv2.destroyAllWindows()
-
 
 if __name__ == '__main__':
     main()
