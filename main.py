@@ -10,6 +10,7 @@ from video import create_capture
 import sys
 import argparse
 import time
+import logging
 
 predictor_path = "resources/shape_predictor_68_face_landmarks.dat"
 detector = dlib.get_frontal_face_detector()
@@ -29,6 +30,17 @@ NOSE_POINTS = list(range(27, 35))
 POINTS = LEFT_BROW_POINTS + RIGHT_EYE_POINTS + LEFT_EYE_POINTS + RIGHT_BROW_POINTS + NOSE_POINTS + MOUTH_POINTS
 ALIGN_POINTS = POINTS
 OVERLAY_POINTS = [POINTS]
+
+class TimeProfiler(object):
+    def __init__(self, label):
+        self.label = label
+
+    def __enter__(self):
+        self.start = time.time()
+        return self
+
+    def __exit__(self, *exc):
+        logging.info("The %s is done in %fs", self.label, time.time() - self.start)
 
 
 def get_cam_frame(cam):
@@ -176,14 +188,19 @@ def blend_w_transparency(face_img, overlay_image):
 
 
 def glasses_filter(cam, glasses, should_show_bounds=False):
-    face = get_cam_frame(cam)
-    landmarks = get_landmarks(face)
+    with TimeProfiler("image capture"):
+        face = get_cam_frame(cam)
+
+    with TimeProfiler("face pose prediction"):
+        landmarks = get_landmarks(face)
 
     # glasses.shape = (height, width, rgba channels)
     pts1 = np.float32([[0, 0], [glasses.shape[1], 0], [0, glasses.shape[0]], [glasses.shape[1], glasses.shape[0]]])
 
+    if type(landmarks) is int:
+        return
 
-    if type(landmarks) is not int:
+    with TimeProfiler("transformation"):
         """
         GLASSES ANCHOR POINTS:
 
@@ -367,20 +384,16 @@ def main():
 
     try:
         while True:
-            start = time.time()
-
-            if "glasses" == args.filter:
-                glasses_filter(cam, footage, args.show_bounds)
-            elif "moustache" == args.filter:
-                moustache_filter(cam, footage, args.show_bounds)
-            elif "face" in args:
-                face_swap_filter(cam, footage, swap_img_landmarks)
-
-            delay = (int(time.time()*1000)-int(start*1000))
-            print(f"{delay} ms")
+            with TimeProfiler(args.filter):
+                if "glasses" == args.filter:
+                    glasses_filter(cam, footage, args.show_bounds)
+                elif "moustache" == args.filter:
+                    moustache_filter(cam, footage, args.show_bounds)
+                elif "face" in args:
+                    face_swap_filter(cam, footage, swap_img_landmarks)
 
             if 0xFF & cv2.waitKey(30) == 27:
-                    break
+                break
 
     except KeyboardInterrupt:
         pass
@@ -388,4 +401,5 @@ def main():
     cv2.destroyAllWindows()
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG)
     main()
