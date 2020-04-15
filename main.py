@@ -45,7 +45,7 @@ class TimeProfiler(object):
 
 def get_cam_frame(cam):
     ret, img = cam.read()
-    img = cv2.resize(img, (800, 450))
+    img = cv2.resize(img, (640, 480))
     return img
 
 
