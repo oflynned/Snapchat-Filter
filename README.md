@@ -3,7 +3,7 @@
 python3 -m virtualenv -p python3 .env
 source .env/bin/activate
 pip3 install -r requirements.txt
-(mkdir -p resources; cd resources; curl http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2 | bzip2 -d)
+(mkdir -p resources; cd resources; curl http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2 | bzip2 -d > shape_predictor_68_face_landmarks.dat)
 
 ```
 
